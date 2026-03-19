@@ -1113,12 +1113,15 @@ function renderTodoLine(
 	const statusColor = closed ? "dim" : "success";
 	const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
 	const assignmentText = renderAssignmentSuffix(theme, todo, currentSessionId);
-	const titleText = theme.fg(titleColor, todo.title || "(untitled)");
+	const titleText = todo.title || "(untitled)";
+	const renderedTitle = isSelected
+		? theme.bold(theme.fg("warning", titleText))
+		: theme.fg(titleColor, titleText);
 	return (
 		prefix +
 		theme.fg("accent", formatTodoId(todo.id)) +
 		" " +
-		(isSelected ? theme.bold(titleText) : titleText) +
+		renderedTitle +
 		theme.fg("muted", tagText) +
 		assignmentText +
 		" " +
