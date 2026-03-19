@@ -1533,11 +1533,14 @@ function groupByProject(entries: FlatTodoEntry[]): ProjectTodos[] {
 }
 
 type DisplayLine = { type: "header"; project: string; openCount: number; closedCount: number }
-	| { type: "todo"; project: string; todo: TodoFrontMatter; flatIndex: number };
+	| { type: "todo"; project: string; todo: TodoFrontMatter; flatIndex: number }
+	| { type: "spacer" };
 
 function buildDisplayLines(groups: ProjectTodos[], flatEntries: FlatTodoEntry[]): DisplayLine[] {
 	const lines: DisplayLine[] = [];
-	for (const { project, todos } of groups) {
+	for (let gi = 0; gi < groups.length; gi++) {
+		const { project, todos } = groups[gi];
+		if (gi > 0) lines.push({ type: "spacer" });
 		const openCount = todos.filter((t) => !isTodoClosed(t.status)).length;
 		const closedCount = todos.length - openCount;
 		lines.push({ type: "header", project, openCount, closedCount });
@@ -1670,6 +1673,11 @@ class AllTodosSelectorComponent extends Container implements Focusable {
 		for (let i = startIndex; i < endIndex; i++) {
 			const line = this.displayLines[i];
 			if (!line) continue;
+
+			if (line.type === "spacer") {
+				this.listContainer.addChild(new Text("", 0, 0));
+				continue;
+			}
 
 			if (line.type === "header") {
 				const headerLabel = `${line.project} (${line.openCount} open, ${line.closedCount} closed)`;
