@@ -1420,6 +1420,335 @@ async function deleteTodo(
 	return result;
 }
 
+interface ProjectTodos {
+	project: string;
+	todos: TodoFrontMatter[];
+}
+
+async function listAllProjectTodos(): Promise<ProjectTodos[]> {
+	let projectDirs: string[] = [];
+	try {
+		const entries = await fs.readdir(GLOBAL_PI_DIR, { withFileTypes: true });
+		projectDirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+	} catch {
+		return [];
+	}
+
+	const results: ProjectTodos[] = [];
+	for (const project of projectDirs.sort()) {
+		const todosDir = path.join(GLOBAL_PI_DIR, project, "todos");
+		const todos = await listTodos(todosDir);
+		if (todos.length > 0) {
+			results.push({ project, todos });
+		}
+	}
+	return results;
+}
+
+function formatAllProjectTodos(projects: ProjectTodos[]): string {
+	if (!projects.length) return "No todos found across any project.";
+
+	const lines: string[] = [];
+	for (const { project, todos } of projects) {
+		const openCount = todos.filter((t) => !isTodoClosed(t.status)).length;
+		const closedCount = todos.length - openCount;
+		lines.push(`${project} (${openCount} open, ${closedCount} closed)`);
+		for (const todo of todos) {
+			const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
+			lines.push(`  ${formatTodoId(todo.id)} ${getTodoTitle(todo)}${tagText} (${todo.status || "open"})`);
+		}
+		lines.push("");
+	}
+	return lines.join("\n").trimEnd();
+}
+
+function buildAllTodosSearchText(project: string, todo: TodoFrontMatter): string {
+	return `${project} ${buildTodoSearchText(todo)}`;
+}
+
+interface FlatTodoEntry {
+	project: string;
+	todo: TodoFrontMatter;
+}
+
+function flattenProjectTodos(projects: ProjectTodos[]): FlatTodoEntry[] {
+	const entries: FlatTodoEntry[] = [];
+	for (const { project, todos } of projects) {
+		for (const todo of todos) {
+			entries.push({ project, todo });
+		}
+	}
+	return entries;
+}
+
+function filterAllTodos(entries: FlatTodoEntry[], query: string): FlatTodoEntry[] {
+	const trimmed = query.trim();
+	if (!trimmed) return entries;
+
+	const tokens = trimmed
+		.split(/\s+/)
+		.map((t) => t.trim())
+		.filter(Boolean);
+	if (!tokens.length) return entries;
+
+	const matches: Array<{ entry: FlatTodoEntry; score: number }> = [];
+	for (const entry of entries) {
+		const text = buildAllTodosSearchText(entry.project, entry.todo);
+		let totalScore = 0;
+		let matched = true;
+		for (const token of tokens) {
+			const result = fuzzyMatch(token, text);
+			if (!result.matches) {
+				matched = false;
+				break;
+			}
+			totalScore += result.score;
+		}
+		if (matched) {
+			matches.push({ entry, score: totalScore });
+		}
+	}
+
+	return matches
+		.sort((a, b) => {
+			const aClosed = isTodoClosed(a.entry.todo.status);
+			const bClosed = isTodoClosed(b.entry.todo.status);
+			if (aClosed !== bClosed) return aClosed ? 1 : -1;
+			return a.score - b.score;
+		})
+		.map((m) => m.entry);
+}
+
+function groupByProject(entries: FlatTodoEntry[]): ProjectTodos[] {
+	const map = new Map<string, TodoFrontMatter[]>();
+	const order: string[] = [];
+	for (const { project, todo } of entries) {
+		if (!map.has(project)) {
+			map.set(project, []);
+			order.push(project);
+		}
+		map.get(project)!.push(todo);
+	}
+	return order.map((project) => ({ project, todos: map.get(project)! }));
+}
+
+type DisplayLine = { type: "header"; project: string; openCount: number; closedCount: number }
+	| { type: "todo"; project: string; todo: TodoFrontMatter; flatIndex: number };
+
+function buildDisplayLines(groups: ProjectTodos[], flatEntries: FlatTodoEntry[]): DisplayLine[] {
+	const lines: DisplayLine[] = [];
+	for (const { project, todos } of groups) {
+		const openCount = todos.filter((t) => !isTodoClosed(t.status)).length;
+		const closedCount = todos.length - openCount;
+		lines.push({ type: "header", project, openCount, closedCount });
+		for (const todo of todos) {
+			const flatIndex = flatEntries.findIndex((e) => e.project === project && e.todo.id === todo.id);
+			lines.push({ type: "todo", project, todo, flatIndex });
+		}
+	}
+	return lines;
+}
+
+class AllTodosSelectorComponent extends Container implements Focusable {
+	private searchInput: Input;
+	private listContainer: Container;
+	private allEntries: FlatTodoEntry[];
+	private filteredEntries: FlatTodoEntry[];
+	private displayLines: DisplayLine[] = [];
+	private selectedFlatIndex = 0;
+	private onCancelCallback: () => void;
+	private tui: TUI;
+	private theme: Theme;
+	private headerText: Text;
+	private hintText: Text;
+
+	private _focused = false;
+	get focused(): boolean {
+		return this._focused;
+	}
+	set focused(value: boolean) {
+		this._focused = value;
+		this.searchInput.focused = value;
+	}
+
+	constructor(
+		tui: TUI,
+		theme: Theme,
+		projects: ProjectTodos[],
+		onCancel: () => void,
+	) {
+		super();
+		this.tui = tui;
+		this.theme = theme;
+		this.allEntries = flattenProjectTodos(projects);
+		this.filteredEntries = this.allEntries;
+		this.onCancelCallback = onCancel;
+
+		this.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+		this.addChild(new Spacer(1));
+
+		this.headerText = new Text("", 1, 0);
+		this.addChild(this.headerText);
+		this.addChild(new Spacer(1));
+
+		this.searchInput = new Input();
+		this.searchInput.onSubmit = () => {};
+		this.addChild(this.searchInput);
+
+		this.addChild(new Spacer(1));
+		this.listContainer = new Container();
+		this.addChild(this.listContainer);
+
+		this.addChild(new Spacer(1));
+		this.hintText = new Text("", 1, 0);
+		this.addChild(this.hintText);
+		this.addChild(new Spacer(1));
+		this.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+		this.updateHeader();
+		this.updateHints();
+		this.applyFilter("");
+	}
+
+	private updateHeader(): void {
+		const totalOpen = this.allEntries.filter((e) => !isTodoClosed(e.todo.status)).length;
+		const totalClosed = this.allEntries.length - totalOpen;
+		const projectCount = new Set(this.allEntries.map((e) => e.project)).size;
+		const title = `All Todos — ${projectCount} projects (${totalOpen} open, ${totalClosed} closed)`;
+		this.headerText.setText(this.theme.fg("accent", this.theme.bold(title)));
+	}
+
+	private updateHints(): void {
+		this.hintText.setText(
+			this.theme.fg("dim", "Type to search • ↑↓ navigate • Esc close"),
+		);
+	}
+
+	private applyFilter(query: string): void {
+		this.filteredEntries = filterAllTodos(this.allEntries, query);
+		const groups = groupByProject(this.filteredEntries);
+		this.displayLines = buildDisplayLines(groups, this.filteredEntries);
+		// Clamp selected index
+		const todoCount = this.filteredEntries.length;
+		if (todoCount === 0) {
+			this.selectedFlatIndex = -1;
+		} else {
+			this.selectedFlatIndex = Math.min(this.selectedFlatIndex, todoCount - 1);
+			if (this.selectedFlatIndex < 0) this.selectedFlatIndex = 0;
+		}
+		this.updateList();
+	}
+
+	private getSelectedDisplayIndex(): number {
+		if (this.selectedFlatIndex < 0) return -1;
+		return this.displayLines.findIndex(
+			(line) => line.type === "todo" && line.flatIndex === this.selectedFlatIndex,
+		);
+	}
+
+	private updateList(): void {
+		this.listContainer.clear();
+
+		if (this.displayLines.length === 0) {
+			this.listContainer.addChild(new Text(this.theme.fg("muted", "  No matching todos"), 0, 0));
+			return;
+		}
+
+		const selectedDisplayIdx = this.getSelectedDisplayIndex();
+		const maxVisible = 14;
+
+		// Compute visible window centered on the selected display line
+		let startIndex = 0;
+		if (selectedDisplayIdx >= 0) {
+			startIndex = Math.max(
+				0,
+				Math.min(selectedDisplayIdx - Math.floor(maxVisible / 2), this.displayLines.length - maxVisible),
+			);
+		}
+		const endIndex = Math.min(startIndex + maxVisible, this.displayLines.length);
+
+		for (let i = startIndex; i < endIndex; i++) {
+			const line = this.displayLines[i];
+			if (!line) continue;
+
+			if (line.type === "header") {
+				const headerLabel = `${line.project} (${line.openCount} open, ${line.closedCount} closed)`;
+				this.listContainer.addChild(
+					new Text(this.theme.fg("muted", this.theme.bold(headerLabel)), 1, 0),
+				);
+				continue;
+			}
+
+			const todo = line.todo;
+			const isSelected = line.flatIndex === this.selectedFlatIndex;
+			const closed = isTodoClosed(todo.status);
+			const prefix = isSelected ? this.theme.fg("accent", "→ ") : "    ";
+			const titleColor = isSelected ? "accent" : closed ? "dim" : "text";
+			const statusColor = closed ? "dim" : "success";
+			const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
+			const assignmentText = todo.assigned_to_session
+				? this.theme.fg("dim", ` (assigned: ${todo.assigned_to_session})`)
+				: "";
+			const display =
+				prefix +
+				this.theme.fg("accent", formatTodoId(todo.id)) +
+				" " +
+				this.theme.fg(titleColor, todo.title || "(untitled)") +
+				this.theme.fg("muted", tagText) +
+				assignmentText +
+				" " +
+				this.theme.fg(statusColor, `(${todo.status || "open"})`);
+			this.listContainer.addChild(new Text(display, 0, 0));
+		}
+
+		if (startIndex > 0 || endIndex < this.displayLines.length) {
+			const todoLines = this.displayLines.filter((l) => l.type === "todo");
+			const currentPos = todoLines.findIndex((l) => l.type === "todo" && l.flatIndex === this.selectedFlatIndex);
+			const scrollInfo = this.theme.fg(
+				"dim",
+				`  (${currentPos + 1}/${todoLines.length})`,
+			);
+			this.listContainer.addChild(new Text(scrollInfo, 0, 0));
+		}
+	}
+
+	handleInput(keyData: string): void {
+		const kb = getEditorKeybindings();
+		if (kb.matches(keyData, "selectCancel")) {
+			this.onCancelCallback();
+			return;
+		}
+		if (kb.matches(keyData, "selectUp")) {
+			this.moveCursor(-1);
+			return;
+		}
+		if (kb.matches(keyData, "selectDown")) {
+			this.moveCursor(1);
+			return;
+		}
+		// All other keys go to search
+		this.searchInput.handleInput(keyData);
+		this.applyFilter(this.searchInput.getValue());
+	}
+
+	private moveCursor(direction: number): void {
+		const todoCount = this.filteredEntries.length;
+		if (todoCount === 0) return;
+		this.selectedFlatIndex =
+			direction < 0
+				? (this.selectedFlatIndex <= 0 ? todoCount - 1 : this.selectedFlatIndex - 1)
+				: (this.selectedFlatIndex >= todoCount - 1 ? 0 : this.selectedFlatIndex + 1);
+		this.updateList();
+	}
+
+	override invalidate(): void {
+		super.invalidate();
+		this.updateHeader();
+		this.updateHints();
+		this.updateList();
+	}
+}
+
 export default function todosExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		const todosDir = getTodosDir(ctx.cwd);
@@ -2209,6 +2538,22 @@ export default function todosExtension(pi: ExtensionAPI) {
 			} else {
 				console.log(`Unknown: /todo ${trimmed}. Try: add, close, reopen`);
 			}
+		},
+	});
+
+	pi.registerCommand("todos-all", {
+		description: "Read-only overview of todos across all projects",
+		handler: async (_args, ctx) => {
+			const projectTodos = await listAllProjectTodos();
+
+			if (!ctx.hasUI) {
+				console.log(formatAllProjectTodos(projectTodos));
+				return;
+			}
+
+			await ctx.ui.custom<void>((tui, theme, _kb, done) => {
+				return new AllTodosSelectorComponent(tui, theme, projectTodos, () => done());
+			});
 		},
 	});
 
