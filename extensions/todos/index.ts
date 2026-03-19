@@ -371,22 +371,7 @@ class TodoSelectorComponent extends Container implements Focusable {
 			const todo = this.filteredTodos[i];
 			if (!todo) continue;
 			const isSelected = i === this.selectedIndex;
-			const closed = isTodoClosed(todo.status);
-			const prefix = isSelected ? this.theme.fg("accent", "→ ") : "  ";
-			const titleColor = closed ? "dim" : "text";
-			const statusColor = closed ? "dim" : "success";
-			const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
-			const assignmentText = renderAssignmentSuffix(this.theme, todo, this.currentSessionId);
-			const titleText = this.theme.fg(titleColor, todo.title || "(untitled)");
-			const line =
-				prefix +
-				this.theme.fg("accent", formatTodoId(todo.id)) +
-				" " +
-				(isSelected ? this.theme.bold(titleText) : titleText) +
-				this.theme.fg("muted", tagText) +
-				assignmentText +
-				" " +
-				this.theme.fg(statusColor, `(${todo.status || "open"})`);
+			const line = renderTodoLine(this.theme, todo, isSelected, "  ", this.currentSessionId);
 			this.listContainer.addChild(new Text(line, 0, 0));
 		}
 
@@ -1111,6 +1096,32 @@ function renderAssignmentSuffix(
 	return theme.fg(color, ` (assigned: ${todo.assigned_to_session}${suffix})`);
 }
 
+function renderTodoLine(
+	theme: Theme,
+	todo: TodoFrontMatter,
+	isSelected: boolean,
+	indent: string,
+	currentSessionId?: string,
+): string {
+	const closed = isTodoClosed(todo.status);
+	const prefix = isSelected ? theme.fg("accent", "→ ") : indent;
+	const titleColor = closed ? "dim" : "text";
+	const statusColor = closed ? "dim" : "success";
+	const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
+	const assignmentText = renderAssignmentSuffix(theme, todo, currentSessionId);
+	const titleText = theme.fg(titleColor, todo.title || "(untitled)");
+	return (
+		prefix +
+		theme.fg("accent", formatTodoId(todo.id)) +
+		" " +
+		(isSelected ? theme.bold(titleText) : titleText) +
+		theme.fg("muted", tagText) +
+		assignmentText +
+		" " +
+		theme.fg(statusColor, `(${todo.status || "open"})`)
+	);
+}
+
 function formatTodoHeading(todo: TodoFrontMatter): string {
 	const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
 	return `${formatTodoId(todo.id)} ${getTodoTitle(todo)}${tagText}${formatAssignmentSuffix(todo)}`;
@@ -1690,24 +1701,7 @@ class AllTodosSelectorComponent extends Container implements Focusable {
 
 			const todo = line.todo;
 			const isSelected = line.flatIndex === this.selectedFlatIndex;
-			const closed = isTodoClosed(todo.status);
-			const prefix = isSelected ? this.theme.fg("accent", "→ ") : "    ";
-			const titleColor = closed ? "dim" : "text";
-			const statusColor = closed ? "dim" : "success";
-			const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
-			const assignmentText = todo.assigned_to_session
-				? this.theme.fg("dim", ` (assigned: ${todo.assigned_to_session})`)
-				: "";
-			const titleText = this.theme.fg(titleColor, todo.title || "(untitled)");
-			const display =
-				prefix +
-				this.theme.fg("accent", formatTodoId(todo.id)) +
-				" " +
-				(isSelected ? this.theme.bold(titleText) : titleText) +
-				this.theme.fg("muted", tagText) +
-				assignmentText +
-				" " +
-				this.theme.fg(statusColor, `(${todo.status || "open"})`);
+			const display = renderTodoLine(this.theme, todo, isSelected, "    ");
 			this.listContainer.addChild(new Text(display, 0, 0));
 		}
 
