@@ -1104,7 +1104,11 @@ function renderTodoLine(
 	currentSessionId?: string,
 ): string {
 	const closed = isTodoClosed(todo.status);
-	const prefix = isSelected ? theme.fg("accent", "→ ") : indent;
+	const arrow = "→ ";
+	const arrowWidth = visibleWidth(arrow);
+	const indentWidth = visibleWidth(indent);
+	const padding = " ".repeat(Math.max(0, indentWidth - arrowWidth));
+	const prefix = isSelected ? theme.fg("accent", arrow) + padding : indent;
 	const titleColor = closed ? "dim" : "text";
 	const statusColor = closed ? "dim" : "success";
 	const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
