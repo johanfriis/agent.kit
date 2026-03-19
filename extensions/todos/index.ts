@@ -1456,7 +1456,7 @@ async function listAllProjectTodos(): Promise<ProjectTodos[]> {
 	const results: ProjectTodos[] = [];
 	for (const project of projectDirs.sort()) {
 		const todosDir = path.join(GLOBAL_PI_DIR, project, "todos");
-		const todos = await listTodos(todosDir);
+		const todos = (await listTodos(todosDir)).filter((t) => !isTodoClosed(t.status));
 		if (todos.length > 0) {
 			results.push({ project, todos });
 		}
@@ -1469,9 +1469,7 @@ function formatAllProjectTodos(projects: ProjectTodos[]): string {
 
 	const lines: string[] = [];
 	for (const { project, todos } of projects) {
-		const openCount = todos.filter((t) => !isTodoClosed(t.status)).length;
-		const closedCount = todos.length - openCount;
-		lines.push(`${project} (${openCount} open, ${closedCount} closed)`);
+		lines.push(`${project} (${todos.length} open)`);
 		for (const todo of todos) {
 			const tagText = todo.tags.length ? ` [${todo.tags.join(", ")}]` : "";
 			lines.push(`  ${formatTodoId(todo.id)} ${getTodoTitle(todo)}${tagText} (${todo.status || "open"})`);
@@ -1551,7 +1549,7 @@ function groupByProject(entries: FlatTodoEntry[]): ProjectTodos[] {
 	return order.map((project) => ({ project, todos: map.get(project)! }));
 }
 
-type DisplayLine = { type: "header"; project: string; openCount: number; closedCount: number }
+type DisplayLine = { type: "header"; project: string; count: number }
 	| { type: "todo"; project: string; todo: TodoFrontMatter; flatIndex: number }
 	| { type: "spacer" };
 
@@ -1560,9 +1558,7 @@ function buildDisplayLines(groups: ProjectTodos[], flatEntries: FlatTodoEntry[])
 	for (let gi = 0; gi < groups.length; gi++) {
 		const { project, todos } = groups[gi];
 		if (gi > 0) lines.push({ type: "spacer" });
-		const openCount = todos.filter((t) => !isTodoClosed(t.status)).length;
-		const closedCount = todos.length - openCount;
-		lines.push({ type: "header", project, openCount, closedCount });
+		lines.push({ type: "header", project, count: todos.length });
 		for (const todo of todos) {
 			const flatIndex = flatEntries.findIndex((e) => e.project === project && e.todo.id === todo.id);
 			lines.push({ type: "todo", project, todo, flatIndex });
@@ -1633,10 +1629,9 @@ class AllTodosSelectorComponent extends Container implements Focusable {
 	}
 
 	private updateHeader(): void {
-		const totalOpen = this.allEntries.filter((e) => !isTodoClosed(e.todo.status)).length;
-		const totalClosed = this.allEntries.length - totalOpen;
+		const totalCount = this.allEntries.length;
 		const projectCount = new Set(this.allEntries.map((e) => e.project)).size;
-		const title = `All Todos — ${projectCount} projects (${totalOpen} open, ${totalClosed} closed)`;
+		const title = `All Todos — ${projectCount} projects (${totalCount} open)`;
 		this.headerText.setText(this.theme.fg("accent", this.theme.bold(title)));
 	}
 
@@ -1699,7 +1694,7 @@ class AllTodosSelectorComponent extends Container implements Focusable {
 			}
 
 			if (line.type === "header") {
-				const headerLabel = `${line.project} (${line.openCount} open, ${line.closedCount} closed)`;
+				const headerLabel = `${line.project} (${line.count} open)`;
 				this.listContainer.addChild(
 					new Text(this.theme.fg("muted", this.theme.bold(headerLabel)), 1, 0),
 				);
