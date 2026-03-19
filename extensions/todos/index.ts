@@ -1675,7 +1675,7 @@ class AllTodosSelectorComponent extends Container implements Focusable {
 			if (!line) continue;
 
 			if (line.type === "spacer") {
-				this.listContainer.addChild(new Text("", 0, 0));
+				this.listContainer.addChild(new Spacer(1));
 				continue;
 			}
 
