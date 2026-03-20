@@ -13,21 +13,6 @@ import { Box, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 export default function (pi: ExtensionAPI) {
-	pi.registerMessageRenderer("callout", (message, _options, theme) => {
-		const details = (message.details ?? {}) as { title?: string };
-		const content = String(message.content ?? "");
-
-		const box = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
-
-		if (details.title) {
-			box.addChild(new Text(theme.fg("accent", details.title), 0, 0));
-			box.addChild(new Spacer(1));
-		}
-
-		box.addChild(new Text(content, 0, 0));
-		return box;
-	});
-
 	pi.registerTool({
 		name: "callout",
 		label: "Callout",
@@ -41,16 +26,9 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params) {
-			pi.sendMessage({
-				customType: "callout",
-				content: params.content,
-				display: true,
-				details: { title: params.title },
-			});
-
 			return {
 				content: [{ type: "text", text: "Displayed callout to user." }],
-				details: {},
+				details: { content: params.content, title: params.title },
 			};
 		},
 
@@ -62,8 +40,19 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(_result, _options, theme) {
-			return new Text("", 0, 0);
+		renderResult(result, _options, theme) {
+			const { content, title } = (result.details ?? {}) as { content?: string; title?: string };
+			if (!content) return new Text("", 0, 0);
+
+			const box = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
+
+			if (title) {
+				box.addChild(new Text(theme.fg("accent", title), 0, 0));
+				box.addChild(new Spacer(1));
+			}
+
+			box.addChild(new Text(content, 0, 0));
+			return box;
 		},
 	});
 }
