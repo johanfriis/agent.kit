@@ -9,7 +9,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Box, Spacer, Text } from "@mariozechner/pi-tui";
+import { Container, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 export default function (pi: ExtensionAPI) {
@@ -28,7 +28,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params) {
 			return {
 				content: [{ type: "text", text: "Displayed callout to user." }],
-				details: { content: params.content, title: params.title },
+				details: { content: params.content },
 			};
 		},
 
@@ -40,19 +40,13 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(result, _options, theme) {
-			const { content, title } = (result.details ?? {}) as { content?: string; title?: string };
+		renderResult(result, _options, _theme) {
+			const { content } = (result.details ?? {}) as { content?: string };
 			if (!content) return new Text("", 0, 0);
-
-			const box = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
-
-			if (title) {
-				box.addChild(new Text(theme.fg("accent", title), 0, 0));
-				box.addChild(new Spacer(1));
-			}
-
-			box.addChild(new Text(content, 0, 0));
-			return box;
+			const container = new Container();
+			container.addChild(new Spacer(1));
+			container.addChild(new Text(content, 0, 0));
+			return container;
 		},
 	});
 }
