@@ -9,9 +9,9 @@
  *   - Inside a git repo → repo name (e.g. agent.kit)
  *   - Outside a git repo → path relative to $HOME, truncated (e.g. ~, ~/dev)
  *
- * Mobile-aware topic length:
- *   - Narrow terminals (≤80 cols): 1–3 words
- *   - Wide terminals (>80 cols):   3–5 words
+ * Width-aware display:
+ *   - Narrow terminals (≤80 cols): π[project] only (no topic)
+ *   - Wide terminals (>80 cols):   π[project] Topic (3–5 words)
  *
  * Pi session name (/sessions list): unchanged, LLM-generated 8–12 words
  */
@@ -104,12 +104,11 @@ function isNarrowTerminal(): boolean {
 
 // ── LLM prompt ───────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(narrow: boolean): string {
-  const topicRange = narrow ? "1-3" : "3-5";
+function buildSystemPrompt(): string {
   return `You generate names for coding sessions.
 
 Return exactly two lines:
-TOPIC: <${topicRange} words>
+TOPIC: <3-5 words>
 SESSION: <8-12 words>
 
 Rules:
@@ -118,7 +117,7 @@ Rules:
 - Use spaces between words. No punctuation.
 - Use sentence case (capitalize only the first word unless a word is already mixed-case or all caps).
 - No quotes, markdown, emojis, labels beyond TOPIC:/SESSION:, or explanations.
-- The TOPIC is a very short summary for a tmux window title — ${narrow ? "bias towards 1–2 words" : "aim for 3–4 words"}.
+- The TOPIC is a very short summary for a tmux window title — aim for 3–4 words.
 - The SESSION name should be descriptive enough for quickly scanning a session list.
 
 Examples:
@@ -251,7 +250,7 @@ function formatNamingPrompt(seed: string, source: NamingSource): string {
 // ── Tmux helpers ─────────────────────────────────────────────────────────────
 
 function formatWindowTitle(project: string, topic?: string): string {
-  if (topic) return `π[${project}] ${topic}`;
+  if (topic && !isNarrowTerminal()) return `π[${project}] ${topic}`;
   return `π[${project}]`;
 }
 
@@ -279,7 +278,6 @@ async function generateNames(
   const apiKey = await ctx.modelRegistry.getApiKey(ctx.model);
   if (!apiKey) return { ok: false, reason: "missing_api_key" };
 
-  const narrow = isNarrowTerminal();
   const message: UserMessage = {
     role: "user",
     content: [{ type: "text", text: formatNamingPrompt(seed, source) }],
@@ -293,7 +291,7 @@ async function generateNames(
   try {
     response = await completeSimple(
       ctx.model,
-      { systemPrompt: buildSystemPrompt(narrow), messages: [message] },
+      { systemPrompt: buildSystemPrompt(), messages: [message] },
       { apiKey, reasoning: "none", maxTokens: 96, signal: controller.signal },
     );
   } catch {
@@ -308,8 +306,7 @@ async function generateNames(
     .join("\n");
 
   const parsed = parseGeneratedNames(generated);
-  const maxTopicWords = narrow ? 3 : 5;
-  const windowTopic = compactTopic(parsed.topic ?? "", maxTopicWords);
+  const windowTopic = compactTopic(parsed.topic ?? "", 5);
   const sessionName = compactSessionName(parsed.session ?? "");
 
   if (!windowTopic || !sessionName) return { ok: false, reason: "invalid_output" };
