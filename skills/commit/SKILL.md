@@ -118,14 +118,11 @@ the user, and let them decide. Never leave the repo in a mid-rebase state.
 
 ### Post-commit summary
 
-After every commit (and push if applicable), show the user a summary. Run:
-
-```bash
-git log -1 --stat --format="commit %h%n%n%w(0,4,4)%B"
-```
-
-Present the output in a ` ```text ` fenced code block so it stands out
-without syntax highlighting artifacts.
+After every commit (and push if applicable), show the user a summary
+using the `callout` tool. Use the commit message and the output from
+`git commit` (which includes the SHA and shortstat). Title should be
+"Commit <short-sha>". No need to run `git log` — you already have
+everything.
 
 ---
 
