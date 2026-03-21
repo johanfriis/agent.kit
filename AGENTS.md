@@ -26,11 +26,11 @@ deploy for testing:
 2. Check if the item is already installed globally (`~/.agents/`)
 3. **If installed globally** — copy it there:
    ```bash
-   cp -r extensions/callout ~/.agents/extensions/callout
+   rsync -a --delete extensions/callout/ ~/.agents/extensions/callout/
    ```
 4. **If not installed globally** — copy it to `.pi/` for local testing:
    ```bash
-   cp -r extensions/callout .pi/extensions/callout
+   rsync -a --delete extensions/callout/ .pi/extensions/callout/
    ```
 5. Inform user they can reload
 
