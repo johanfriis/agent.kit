@@ -1,21 +1,17 @@
 ---
 name: commit
 description: |
-  End-to-end git commit workflow: staging, reviewing, committing, and pushing.
-  ALWAYS use `git hunk` commands instead of `git add` for staging changes.
+  Advanced git workflows beyond simple stage-commit-push.
+  NOT needed for routine commits — those are covered by AGENTS.md.
   Use when:
-  - Staging changes (`git hunk add` instead of `git add`)
-  - Reviewing, diffing, or inspecting changes before committing
   - Selectively staging or unstaging specific hunks
   - Splitting changes across multiple atomic commits
-  - Making commits with conventional commit messages
-  - Amending recent commits
-  - Pushing commits or pulling with rebase
+  - Amending recent commits or force pushing
   - Stashing or restoring specific hunks
-  - Any git workflow involving stage, unstage, commit, push, pull, diff, stash, or revert
-  Triggers: "git add", "stage", "staging", "commit", "push", "pull", "prepare commit",
-  "selective commit", "partial commit", "split commit", "review changes", "what changed",
-  "diff", "unstage", "stash", "discard changes", "revert changes", "amend", "force push"
+  - Resolving merge conflicts
+  - Discarding or reverting changes
+  Triggers: "selective commit", "partial commit", "split commit", "unstage",
+  "stash", "discard changes", "revert changes", "amend", "force push", "conflict"
 ---
 
 # Commit Skill
