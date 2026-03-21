@@ -10,7 +10,6 @@
  *
  * Usage:
  *   /parrot    - Open last AI message in external editor
- *   Alt+R      - Keyboard shortcut for the same action
  */
 
 import { spawnSync } from "node:child_process";
@@ -25,11 +24,8 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { TextContent } from "@mariozechner/pi-ai";
-import { Key } from "@mariozechner/pi-tui";
-
 const DESCRIPTION =
   "Open last AI message in external editor, then send edited message after save";
-const KEYBOARD_SHORTCUT = Key.alt("r");
 const CUSTOM_MESSAGE_TYPE = "🦜 parrot squawking";
 
 function findLastAssistantMessage(
@@ -195,13 +191,6 @@ async function parrotHandler(pi: ExtensionAPI, ctx: ExtensionContext) {
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.registerShortcut(KEYBOARD_SHORTCUT, {
-    description: DESCRIPTION,
-    handler: async (ctx: ExtensionContext) => {
-      await parrotHandler(pi, ctx);
-    },
-  });
-
   pi.registerCommand("parrot", {
     description: DESCRIPTION,
     handler: async (_args: string, ctx: ExtensionContext) => {
