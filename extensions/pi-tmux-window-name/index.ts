@@ -275,8 +275,8 @@ async function generateNames(
   if (!seed) return { ok: false, reason: "missing_prompt" };
   if (!ctx.model) return { ok: false, reason: "missing_model" };
 
-  const apiKey = await ctx.modelRegistry.getApiKey(ctx.model);
-  if (!apiKey) return { ok: false, reason: "missing_api_key" };
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+  if (!auth.ok) return { ok: false, reason: "missing_api_key" };
 
   const message: UserMessage = {
     role: "user",
@@ -292,7 +292,7 @@ async function generateNames(
     response = await completeSimple(
       ctx.model,
       { systemPrompt: buildSystemPrompt(), messages: [message] },
-      { apiKey, reasoning: "none", maxTokens: 96, signal: controller.signal },
+      { apiKey: auth.apiKey, headers: auth.headers, reasoning: "none", maxTokens: 96, signal: controller.signal },
     );
   } catch {
     return { ok: false, reason: "request_failed" };
