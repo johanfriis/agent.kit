@@ -36,3 +36,14 @@ deploy for testing:
 
 Never promote a locally-tested item to `~/.agents/` as part of this workflow.
 Installing globally is a separate, deliberate decision.
+
+## Building extensions
+
+Before writing or modifying an extension, read the pi extensions documentation:
+
+```bash
+# Local copy (preferred)
+find ~/.local/share/mise/installs/npm-mariozechner-pi-coding-agent -name "extensions.md" -path "*/docs/*"
+```
+
+Fallback URL: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md
