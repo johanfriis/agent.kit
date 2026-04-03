@@ -1,0 +1,308 @@
+-- allium: 3
+-- pi-allium.allium
+--
+-- Scope: Behavioural contract for the pi-allium extension
+-- Includes: Change management, workshop workflow, validation,
+--           subagent orchestration (tend/weed)
+-- Excludes: Allium language itself, upstream skill internals,
+--           pi extension API internals
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+value ChangeArtifacts {
+    proposal: Document
+    design: Document
+    tasks: Document
+}
+
+value ValidationDiagnostic {
+    file: Path
+    message: String
+    severity: error | warning
+}
+
+value SubagentResult {
+    output: String
+    exit_code: Integer
+    success: exit_code = 0
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity Change {
+    name: String
+    status: active | archived
+    artifacts: ChangeArtifacts
+    folder_path: Path
+    archived_at: Timestamp when status = archived
+    archive_name: String when status = archived
+
+    transitions status {
+        active -> archived
+        terminal: archived
+    }
+}
+
+entity WorkshopSession {
+    mode: explore | propose | challenge
+    change: Change?
+
+    transitions mode {
+        explore -> propose
+        propose -> challenge
+        explore -> explore
+        propose -> propose
+        challenge -> challenge
+    }
+}
+
+entity ValidationRun {
+    file: Path
+    cli_available: Boolean
+    diagnostics: List<ValidationDiagnostic> when cli_available
+    skipped: not cli_available
+}
+
+entity SubagentInvocation {
+    kind: tend | weed
+    spec_files: List<Path>
+    context_paths: List<Path>
+    result: SubagentResult?
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    specs_dir: Path = "specs"
+    changes_dir: Path = specs_dir + "/changes"
+    archive_dir: Path = changes_dir + "/archive"
+    tend_skill_path: Path
+    weed_skill_path: Path
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- ── Change management ───────────────────────────────────
+
+rule ScaffoldChange {
+    when: ScaffoldRequest(name)
+    requires: not exists Change where name = name and status = active
+    ensures: Change.created(
+        name: name,
+        status: active,
+        artifacts: ChangeArtifacts(
+            proposal: template_proposal,
+            design: template_design,
+            tasks: template_tasks
+        ),
+        folder_path: config.changes_dir + "/" + name
+    )
+}
+
+rule ListChanges {
+    when: ListRequest()
+    -- Read-only query, no state changes
+    -- Returns active and archived changes
+    ensures: ChangesListed(
+        active: Changes where status = active,
+        archived: Changes where status = archived
+    )
+}
+
+rule ArchiveChange {
+    when: ArchiveRequest(name)
+    requires: change: Change where name = name and status = active
+    let date_prefix = today_iso
+    ensures: change.status = archived
+    ensures: change.archived_at = now
+    ensures: change.archive_name = date_prefix + "-" + name
+}
+
+-- ── Validation ──────────────────────────────────────────
+
+rule ValidateAlliumFile {
+    when: _: AlliumFileModified(file)
+    ensures: ValidationRun.created(
+        file: file,
+        cli_available: allium_cli_installed
+    )
+    ensures:
+        if allium_cli_installed:
+            DiagnosticsSurfaced(file, diagnostics)
+    @guidance
+        -- Fires on tool_execution_end when edit or write
+        -- touches a .allium file. Runs `allium check` and
+        -- injects diagnostics as follow-up context for the model.
+        -- Gracefully skips when the allium CLI is not installed.
+}
+
+-- ── Subagent orchestration ──────────────────────────────
+
+rule InvokeTend {
+    when: TendRequest(spec_files, change)
+    requires: spec_files.count > 0
+    let context = change.artifacts if change != null
+    ensures: SubagentInvocation.created(
+        kind: tend,
+        spec_files: spec_files,
+        context_paths: context_paths_from(change)
+    )
+    @guidance
+        -- Spawns a headless pi session with the upstream tend
+        -- skill. Passes change folder proposal + design as
+        -- context so tend understands what should change.
+        -- The subagent operates in its own conversation context.
+}
+
+rule InvokeWeed {
+    when: WeedRequest(spec_files, code_paths)
+    requires: spec_files.count > 0
+    requires: code_paths.count > 0
+    ensures: SubagentInvocation.created(
+        kind: weed,
+        spec_files: spec_files,
+        context_paths: code_paths
+    )
+    @guidance
+        -- Spawns a headless pi session with the upstream weed
+        -- skill. Passes spec files and implementation paths
+        -- so weed can check alignment.
+}
+
+rule SubagentCompletes {
+    when: invocation: SubagentInvocation.result becomes not null
+    ensures: SubagentOutputRelayed(invocation)
+    @guidance
+        -- Captures the subagent's output and relays it back
+        -- to the main session for the user to review.
+}
+
+-- ── Workshop ────────────────────────────────────────────
+
+rule StartWorkshop {
+    when: WorkshopRequest()
+    ensures: WorkshopSession.created(
+        mode: explore
+    )
+    @guidance
+        -- Injects the workshop skill instructions and points
+        -- the model at the codebase and existing specs.
+}
+
+rule WorkshopPropose {
+    when: session: WorkshopSession.mode transitions_to propose
+    ensures: Change.created(
+        name: proposed_name,
+        status: active,
+        artifacts: ChangeArtifacts(
+            proposal: drafted_proposal,
+            design: drafted_design,
+            tasks: drafted_tasks
+        ),
+        folder_path: config.changes_dir + "/" + proposed_name
+    )
+    ensures: session.change = Change
+}
+
+rule WorkshopChallenge {
+    when: session: WorkshopSession.mode transitions_to challenge
+    requires: session.change != null
+    -- Challenge mode forces adversarial review
+    -- No "looks good" responses allowed
+    ensures: ChallengeStarted(session)
+    @guidance
+        -- Applies adversarial review techniques:
+        -- pre-mortem, first principles, inversion,
+        -- red team, constraint removal, stakeholder mapping.
+        -- Zero findings triggers re-analysis.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant UniqueActiveChangeNames {
+    -- No two active changes share the same name
+    for c1 in Changes where status = active:
+        for c2 in Changes where status = active:
+            c1 = c2 or c1.name != c2.name
+}
+
+invariant ArchiveHasDatePrefix {
+    for change in Changes where status = archived:
+        change.archive_name != null
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface ChangeManagement {
+    facing user: User
+
+    exposes:
+        for change in Changes where status = active:
+            change.name
+            change.status
+            change.folder_path
+        for change in Changes where status = archived:
+            change.archive_name
+
+    provides:
+        ScaffoldRequest(name: String)
+        ListRequest()
+        ArchiveRequest(name: String)
+            when exists Change where name = name and status = active
+}
+
+surface WorkshopSurface {
+    facing user: User
+
+    context session: WorkshopSession
+
+    exposes:
+        session.mode
+        session.change
+
+    provides:
+        WorkshopRequest()
+}
+
+surface AlliumIntegration {
+    facing user: User
+
+    provides:
+        TendRequest(spec_files: List<Path>, change: Change?)
+        WeedRequest(spec_files: List<Path>, code_paths: List<Path>)
+
+    @guarantee AutoValidation
+        -- Every .allium file modification triggers validation
+        -- automatically, without explicit user action.
+
+    @guarantee GracefulDegradation
+        -- When the allium CLI is not installed, validation
+        -- is silently skipped. No errors are surfaced.
+
+    @guarantee IsolatedSubagents
+        -- Tend and weed subagents run in their own conversation
+        -- context via headless pi sessions. They do not pollute
+        -- the main session's context window.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should workshop challenge mode be mandatory before handing off to tend, or always optional?"
+
+open question "Should the extension auto-detect spec files and code paths for weed, or always require explicit arguments?"
+
+open question "Should archived changes be prunable after a configurable retention period?"

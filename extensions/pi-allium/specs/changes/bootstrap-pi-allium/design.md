@@ -1,57 +1,64 @@
 ## Approach
 
-pi-allium is a pi extension that wraps Allium's methodology into
-pi-native patterns. Since pi doesn't support agents, we translate
-Allium's agent workflows into skills and tools.
+pi-allium is a pi extension that provides two things: an integration
+layer that makes Allium's existing toolchain work natively in pi, and
+new workflow capabilities (workshop, change management) that Allium
+doesn't have in any tool.
 
 ### Architecture
 
 ```
 pi-allium extension
-├── tools (registered via pi's ExtensionAPI)
-│   ├── allium_change     — scaffold/list/archive change folders
-│   └── allium_workshop   — structured exploration tool
+├── integration
+│   ├── validation hook   — tool_execution_end → allium check
+│   ├── syntax skill      — upstream rule content as a pi skill
+│   └── subagent tools    — tend/weed via headless pi sessions
+├── tools
+│   └── allium_change     — scaffold/list/archive change folders
 ├── commands
 │   ├── /workshop         — start a workshop session
+│   ├── /tend             — invoke tend subagent
+│   ├── /weed             — invoke weed subagent
 │   └── /changes          — list active changes
-└── references
-    ├── language-reference.md   — Allium syntax (from upstream)
-    ├── patterns.md             — common spec patterns (from upstream)
-    └── workflow.md             — pi-allium specific workflow guide
+└── skills
+    └── workshop          — exploration methodology
 ```
 
-### Agent → Skill translation
+### Allium mapping
 
-Allium's agents are long-running delegates that load the language
-reference into their own conversation. Pi skills achieve similar
-results through instruction files that the LLM reads on demand.
+Nothing is forked. Upstream skills and agent instructions are used
+directly; the extension provides the wiring.
 
-| Allium agent/skill | pi-allium equivalent | Approach |
-|--------------------|----------------------|----------|
-| tend (agent)       | Instructions in SKILL.md | Load language ref, modify .allium in-place |
-| weed (agent)       | Instructions in SKILL.md | Compare .allium specs against code, report |
-| elicit (skill)     | Reuse directly | Methodology works as-is via instructions |
-| distill (skill)    | Reuse directly | Methodology works as-is via instructions |
-| propagate (skill)  | Reuse directly | Methodology works as-is via instructions |
-| workshop (new)     | New skill | Exploration + change folder creation |
+| Allium (Claude Code) | pi-allium | How |
+|----------------------|-----------|-----|
+| hook (allium-check.mjs) | `tool_execution_end` event | Extension runs `allium check` after `.allium` writes/edits |
+| rule (allium.md, glob-triggered) | Syntax skill | Upstream rule content registered as a pi skill |
+| tend (agent) | `/tend` command | Headless `pi -p --skill tend.md --no-session` |
+| weed (agent) | `/weed` command | Headless `pi -p --skill weed.md --no-session` |
+| elicit (skill) | Use directly | Install upstream skill in pi |
+| distill (skill) | Use directly | Install upstream skill in pi |
+| propagate (skill) | Use directly | Install upstream skill in pi |
+| — | Workshop (new) | Exploration + change folder creation |
+| — | Change management (new) | Proposal/design/tasks convention |
 
-The key difference: Claude Code agents get their own conversation
-context, keeping the language reference out of the main session. In pi,
-the language reference loads into the main context when needed. This
-costs context window space but avoids the need for agent delegation.
+The key architectural win: headless pi sessions give tend and weed
+their own conversation context, just like Claude Code agents. The
+language reference stays out of the main session. Same delegation
+model, different mechanism.
 
 ### The pipeline
 
 The change folder artifacts flow to different consumers:
 
 ```
-proposal + design  →  tend/elicit (spec work)
+proposal + design  →  tend/elicit subagent (spec work)
 tasks              →  you / your coding agent (implementation)
 ```
 
-Workshop produces all three, then they diverge. Tend/elicit uses the
-proposal to understand what should change and the design to understand
-how. The coding agent uses tasks as a checklist. Clean separation.
+Workshop produces all three, then they diverge. The tend/elicit
+subagent reads the proposal and design to understand what should
+change and how. The coding agent uses tasks as a checklist. Clean
+separation.
 
 ### Change folder lifecycle
 
@@ -63,22 +70,24 @@ how. The coding agent uses tasks as a checklist. Clean separation.
        └── tasks.md
 
 2. Spec work (on a git branch)
-   └── LLM reads proposal + design as context
-   └── LLM modifies .allium files in-place (tend) or creates new ones (elicit)
+   └── /tend or elicit skill
+   └── subagent reads proposal + design as context
+   └── modifies .allium files in-place (tend) or creates new (elicit)
+   └── validation hook runs allium check after each edit
    └── git tracks the diff
 
 3. Implementation
-   └── LLM reads tasks.md
+   └── coding agent reads tasks.md
    └── writes code, checks off tasks
 
 4. Verification
-   └── weed: compares .allium specs against code, reports mismatches
+   └── /weed: subagent compares .allium specs against code
    └── verify: checks implementation against change record
        (completeness, correctness, coherence)
 
 5. Archive
    └── git merge the branch
-   └── move change folder to specs/changes/archive/YYYY-MM-DD-<name>/
+   └── allium_change tool moves folder to archive
 ```
 
 ### Workshop skill design
@@ -109,6 +118,10 @@ Two techniques available:
 
 ### What the extension registers
 
+**Validation hook** — `tool_execution_end` listener. When edit or
+write touches a `.allium` file and the `allium` CLI is installed,
+runs `allium check` and surfaces diagnostics to the model.
+
 **`allium_change` tool** — manages change folders:
 - `scaffold` action: creates the directory structure
 - `list` action: shows active and archived changes
@@ -118,55 +131,44 @@ Two techniques available:
 workshop skill instructions and pointing the LLM at the codebase and
 existing specs.
 
+**`/tend` command** — spawns a headless pi session with the upstream
+tend agent instructions as a skill. Passes the relevant `.allium`
+files and change folder context.
+
+**`/weed` command** — spawns a headless pi session with the upstream
+weed agent instructions as a skill. Passes the spec files and
+implementation paths.
+
 **`/changes` command** — quick listing of active changes.
 
 ### Decisions
 
 **Why an extension, not just a skill?**
 
-The workshop methodology itself is pure instructions (skill-appropriate).
-But managing change folders (scaffold, list, archive) benefits from
-deterministic tooling — an extension can create directories, move files,
-and format listings reliably without relying on the LLM to run bash
-commands.
+Three things require extension capabilities: the validation hook
+(event listener), subagent orchestration (spawning headless pi
+sessions), and change folder management (deterministic file
+operations). A skill can only provide instructions.
 
-**Why bundle Allium's references rather than linking?**
+**Why use upstream Allium directly instead of forking?**
 
-Pi skills need the reference material accessible as files the LLM can
-read. Bundling copies of the language reference and patterns library
-means they work offline and don't depend on the upstream repo being
-cloned locally. We pin to a specific version and update deliberately.
+Allium's skills (elicit, distill, propagate) work in pi as-is —
+they're instruction files and pi has native skill support. The
+agent instructions (tend, weed) work as skill files for headless
+pi sessions. The language reference and patterns library are
+accessible to the subagents through normal file reads. Nothing
+needs to be copied, bundled, or adapted.
 
 **Why not a separate skill + extension?**
 
-The workshop skill and the change management tools are tightly coupled —
-workshop creates change folders, the tool manages them. Keeping them in
-one extension avoids a coordination problem.
+The workshop skill, validation hook, subagent orchestration, and
+change management tools are all tightly coupled — they form a
+single workflow. Keeping them in one extension avoids coordination
+problems.
 
 **Why no patch format for .allium files?**
 
-Allium specs are tightly coupled internally — adding a field to an entity
-cascades across transition graphs, rules, invariants, and surfaces. A
-meaningful patch would need to express interdependent modifications
-across 6+ sections, which is harder to read than the modified file. Git
-diffs on the full .allium files are cleaner, more readable, and already
-handle merging and conflict detection.
-
-**Why no bidirectional spec-code linking (à la lat.md)?**
-
-Allium's formal naming conventions make explicit backlinks redundant.
-`entity Order` maps to `class Order` in code; `rule CancelOrder` maps to
-`cancelOrder()`. The naming convention IS the bidirectional link. Grep
-provides structural tracing. Weed provides semantic checking. Adding
-`// @allium: entity Order` comments would be ceremony for ceremony's sake.
-Markdown specs need explicit backlinks because they lack structural
-identifiers; Allium specs don't.
-
-**Why no RAG/embeddings search?**
-
-Code search (RAG over codebase) is a general-purpose concern, not a spec
-workflow feature. Spec search (RAG over .allium files) could be useful
-for large projects but is out of scope for v1 — a handful of .allium
-files are greppable. lat.md or a standalone search tool could be used
-alongside pi-allium if this need arises. pi-allium's scope is the spec
-workflow loop: workshop → tend → propagate → implement → weed → archive.
+Allium specs are tightly coupled internally — adding a field to an
+entity cascades across transition graphs, rules, invariants, and
+surfaces. Git diffs on the full `.allium` files are cleaner, more
+readable, and already handle merging and conflict detection.
