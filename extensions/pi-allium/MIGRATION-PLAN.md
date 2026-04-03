@@ -65,6 +65,8 @@ johanfriis/pi.allium/
 │   │   ├── SKILL.md          # Adapted from upstream allium SKILL.md
 │   │   └── references/
 │   │       ├── language-reference.md
+│   │       ├── migration-v1-to-v2.md
+│   │       ├── migration-v2-to-v3.md
 │   │       ├── patterns.md
 │   │       └── test-generation.md
 │   ├── elicit/
@@ -507,27 +509,36 @@ content. Take upstream changes verbatim — no adaptation needed.
 2. Update agent.kit AGENTS.md if it references pi-allium
 3. Commit and push
 
-## Open Questions
+## Resolved Questions
 
-1. **Model for agents**: What model should tend/weed default to?
-   `claude-sonnet-4-6` is the safe choice. Haiku would be faster
-   but may struggle with complex spec work.
+1. **Model for agents**: `claude-sonnet-4-6`. Both tend and weed
+   require real reasoning — domain modeling, spec syntax precision,
+   cross-referencing code against spec semantics. Haiku is too
+   risky for system-of-record work. Can add a `model` flag later
+   if speed becomes a concern.
 
-2. **Workshop as subagent?** Currently workshop runs in-session
-   (intentional — you want the conversation context). Should it
-   stay that way or also become a subagent?
+2. **Workshop as subagent?** No — stays in-session. Workshop is
+   inherently conversational (explore → propose → challenge). A
+   subagent would lose conversation context and interactivity,
+   which are workshop's core value.
 
-3. **Propagate**: Should propagate also become an agent? It's
-   currently a skill (instructions the model follows in-session).
-   Unlike tend/weed, propagate generates code (tests) so it might
-   benefit from isolated context.
+3. **Propagate**: Stays as a skill. It generates test code that
+   needs to match the current project's test patterns, framework,
+   and fixtures — context the main session already has. Isolating
+   it means rediscovering all of that. Revisit if context window
+   pressure becomes an issue.
 
-4. **pi-allium spec**: The `pi-allium.allium` spec in the current
-   extension — does it move to the new repo? Its SubagentInvocation
-   entity and IsolatedSubagents guarantee would now actually be
-   accurate.
+4. **pi-allium spec**: Yes, moves to the new repo under `specs/`.
+   The spec describes the extension's behavior; it belongs next to
+   the code it describes. `SubagentInvocation` and
+   `IsolatedSubagents` become actually true with pi-subagents.
 
-5. **Elicit references**: The elicit skill has a `references/`
-   subdirectory with `library-spec-signals.md`. Propagate has
-   `references/test-generation.md`. Verify we're copying all
-   reference subdirectories, not just the SKILL.md files.
+5. **Elicit references**: The `references/*` globs in the file
+   mapping handle this correctly. Notes:
+   - `allium/references/` has 5 files: language-reference.md,
+     patterns.md, test-generation.md, migration-v1-to-v2.md,
+     migration-v2-to-v3.md
+   - `elicit/references/` has library-spec-signals.md
+   - `propagate` has NO references dir — it references
+     allium's test-generation.md via relative path
+   - `distill` has NO references dir
